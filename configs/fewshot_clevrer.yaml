@@ -1,0 +1,25 @@
+experiment:
+  name: logifew_fewshot_clevrer
+  seed: 13
+  project: logifew
+
+data:
+  clevrer:
+    path: data/logifew/clevrer_beta_s_train.jsonl
+    ood_path: data/logifew/clevrer_beta_s_ood.jsonl
+    shots: 5
+    batch_size: 8
+
+model:
+  checkpoint: checkpoints/pretrain.ckpt
+  freeze_encoder: true
+  adaptation_steps: 4
+  inner_lr: 0.0005
+
+evaluation:
+  metrics: ["EDA", "PVR", "LCS", "DER", "RIF1"]
+  baseline_scores:
+    transformer_t5_small:
+      EDA: 0.52
+      DER: 0.003
+*** End Patch

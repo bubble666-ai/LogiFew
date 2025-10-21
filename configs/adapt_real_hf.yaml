@@ -1,0 +1,34 @@
+experiment:
+  name: logifew_adapt_real_hf
+  seed: 21
+  project: logifew
+
+data:
+  path: data/logifew/clevrer_real_train.jsonl
+  limit: 400
+  val_split: 0.2
+  batch_size: 4
+
+model:
+  checkpoint: checkpoints/pretrain.ckpt
+  encoder:
+    type: hf_text
+    hf_model_name: models--google-t5--t5-small/snapshots/df1b051c49625cf57a3d0d8d3863ed4d13564fe4
+    hf_max_length: 128
+    hidden_size: 256
+    dropout: 0.1
+    hf_local_files_only: true
+  rule_memory:
+    num_rules: 64
+    key_dim: 128
+    value_dim: 128
+    dropout: 0.3
+  reasoner:
+    temperature: 0.67
+    proof_depth: 3
+
+training:
+  max_epochs: 20
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  log_every_n_steps: 10

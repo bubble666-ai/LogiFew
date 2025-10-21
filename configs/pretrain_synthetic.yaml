@@ -1,0 +1,36 @@
+experiment:
+  name: logifew_pretrain_rulebank
+  seed: 42
+  project: logifew
+
+data:
+  synthetic_rulebank:
+    num_proofs: 500
+    predicates: ["LeftOf", "RightOf", "Heavier", "Supports", "Touches"]
+    variables: ["A", "B", "C", "D"]
+    max_body_literals: 4
+    noise_probability: 0.1
+    negative_ratio: 0.5
+
+model:
+  encoder:
+    type: text
+    hidden_size: 256
+    dropout: 0.1
+  rule_memory:
+    num_rules: 64
+    key_dim: 128
+    value_dim: 128
+    dropout: 0.3
+  reasoner:
+    temperature: 0.67
+    proof_depth: 3
+
+training:
+  batch_size: 16
+  max_epochs: 3
+  gradient_clip_val: 1.0
+  learning_rate: 0.0003
+  weight_decay: 0.01
+  log_every_n_steps: 10
+  evaluate_every_n_steps: 50

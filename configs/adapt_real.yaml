@@ -1,0 +1,32 @@
+experiment:
+  name: logifew_adapt_real
+  seed: 21
+  project: logifew
+
+data:
+  path: data/logifew/clevrer_real_train.jsonl
+  limit: 400
+  val_split: 0.2
+  batch_size: 8
+
+model:
+  checkpoint: checkpoints/pretrain.ckpt
+  encoder:
+    type: bow
+    input_dim: 2048
+    hidden_size: 256
+    dropout: 0.1
+  rule_memory:
+    num_rules: 64
+    key_dim: 128
+    value_dim: 128
+    dropout: 0.3
+  reasoner:
+    temperature: 0.67
+    proof_depth: 3
+
+training:
+  max_epochs: 5
+  learning_rate: 0.0002
+  weight_decay: 0.01
+  log_every_n_steps: 10
