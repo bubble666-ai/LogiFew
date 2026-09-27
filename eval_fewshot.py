@@ -9,8 +9,15 @@ from typing import List
 import torch
 from torch.utils.data import DataLoader
 
-from logifew.data.datasets import ClevrerBetaSDataset, TextEncoder, collate_fn, load_jsonl_dataset
+from logifew.data.datasets import (
+    INDEX_TO_LABEL,
+    ClevrerBetaSDataset,
+    TextEncoder,
+    collate_fn,
+    load_jsonl_dataset,
+)
 from logifew.models.nsml import NSMLConfig, NSMLModel
+from logifew.utils.checkpoints import extract_model_state, safe_torch_load
 from logifew.utils.metrics import (
     data_efficiency_ratio,
     exact_deduction_accuracy,
@@ -36,10 +43,14 @@ def load_model(checkpoint_path: str | None) -> NSMLModel:
     config = NSMLConfig()
     state_to_load = None
     if checkpoint_path:
-        state_dict = torch.load(checkpoint_path, map_location="cpu")
-        if "model_config" in state_dict:
-            config = NSMLConfig(**state_dict["model_config"])
-        state_to_load = state_dict["state_dict"] if "state_dict" in state_dict else state_dict
+        checkpoint = safe_torch_load(checkpoint_path, map_location="cpu")
+        raw_state, model_cfg = extract_model_state(checkpoint)
+        if model_cfg:
+            try:
+                config = NSMLConfig(**model_cfg)
+            except TypeError:
+                print("[eval] checkpoint model_config has unknown fields; using defaults")
+        state_to_load = raw_state
     model = NSMLModel(config)
     if state_to_load is not None:
         load_result = model.load_state_dict(state_to_load, strict=False)
@@ -53,10 +64,14 @@ def load_model(checkpoint_path: str | None) -> NSMLModel:
 
 
 def few_shot_subset(items: List[dict], shots: int) -> List[dict]:
-    """Take k examples from each label category."""
-    buckets = {"yes": [], "no": [], "unknown": []}
+    """Take up to k examples from each known label category (skips unknowns)."""
+    if shots <= 0:
+        raise ValueError(f"--shots must be positive, got {shots}")
+    buckets: dict[str, list[dict]] = {"yes": [], "no": [], "unknown": []}
     for item in items:
-        label = item["label"]
+        label = item.get("label")
+        if label not in buckets:
+            continue  # skip malformed labels instead of KeyError
         if len(buckets[label]) < shots:
             buckets[label].append(item)
     subset: List[dict] = []
@@ -65,10 +80,37 @@ def few_shot_subset(items: List[dict], shots: int) -> List[dict]:
     return subset
 
 
+def _extract_gold_rules(sample: dict, out: set[str]) -> None:
+    for premise in sample.get("premises", []) or []:
+        if isinstance(premise, str) and premise.strip() and "->" in premise:
+            out.add(premise.strip())
+
+
+def _extract_discovered_rules(sample: dict, out: set[str]) -> None:
+    # ponytail: discovered = only model/dataset proof_trace candidates, never
+    # copied from premises (that made RIF1 trivially 1.0).
+    for trace_step in sample.get("proof_trace", []) or []:
+        if not isinstance(trace_step, str):
+            continue
+        cleaned = trace_step.strip()
+        if not cleaned:
+            continue
+        if cleaned.startswith("rule") or cleaned.startswith("% Induced"):
+            out.add(cleaned.split(":", 1)[-1].strip() if ":" in cleaned else cleaned)
+        elif "Rule" in cleaned and ":" in cleaned:
+            out.add(cleaned.split(":", 1)[-1].strip())
+        elif "->" in cleaned:
+            out.add(cleaned)
+
+
 def evaluate(args: argparse.Namespace) -> dict:
     dataset_path = Path(args.dataset)
     items = load_jsonl_dataset(dataset_path)
+    if not items:
+        raise ValueError(f"No examples found in {dataset_path}")
     shot_items = few_shot_subset(items, args.shots)
+    if not shot_items:
+        raise ValueError(f"few-shot subset is empty (shots={args.shots}, n={len(items)})")
     dataset = ClevrerBetaSDataset(shot_items, encoder=TextEncoder())
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
 
@@ -100,7 +142,7 @@ def evaluate(args: argparse.Namespace) -> dict:
                     predictions.append("no")
                 else:
                     predictions.append("unknown")
-                labels.append(["no", "yes", "unknown"][batch["labels"][idx].item()])
+                labels.append(INDEX_TO_LABEL[batch["labels"][idx].item()])
                 proof_trace = assemble_proof(
                     query=f"{predictions[-1]}?",
                     rules=["soft_rule"],
@@ -108,34 +150,16 @@ def evaluate(args: argparse.Namespace) -> dict:
                     confidence=prob_value,
                 )
                 sample = batch_samples[idx]
-                premises_list = sample.get("premises", [])
-                proof_valid = validate_proof(sample.get("proof_trace", []), premises_list)
+                premises_list = sample.get("premises", []) or []
+                proof_valid = validate_proof(sample.get("proof_trace", []) or [], premises_list)
                 proof_traces.append(proof_trace if proof_valid else [])
-                sample = batch_samples[idx]
-                for premise in sample.get("premises", []):
-                    if isinstance(premise, str) and premise.strip():
-                        if "->" in premise or ":" in premise or " :- " in premise:
-                            gold_rules.add(premise.strip())
-                for trace_step in sample.get("proof_trace", []):
-                    if isinstance(trace_step, str):
-                        cleaned = trace_step.strip()
-                        if not cleaned:
-                            continue
-                        if cleaned.startswith("rule") or cleaned.startswith("% Induced"):
-                            discovered_rules.add(cleaned.split(":", 1)[-1].strip() if ":" in cleaned else cleaned)
-                        elif "Rule" in cleaned and ":" in cleaned:
-                            discovered_rules.add(cleaned.split(":", 1)[-1].strip())
-                        elif "->" in cleaned:
-                            discovered_rules.add(cleaned)
-                if sample.get("premises"):
-                    for premise in sample["premises"]:
-                        if isinstance(premise, str) and "->" in premise:
-                            discovered_rules.add(premise.strip())
+                _extract_gold_rules(sample, gold_rules)
+                _extract_discovered_rules(sample, discovered_rules)
             offset += len(probs)
 
     symbolic_probs = [0.5 for _ in predicted_probs]
     metric_names = [metric.strip().upper() for metric in args.metrics.split(",")]
-    results = {}
+    results: dict = {}
 
     if "EDA" in metric_names:
         results["EDA"] = exact_deduction_accuracy(predictions, labels)
@@ -144,9 +168,10 @@ def evaluate(args: argparse.Namespace) -> dict:
     if "LCS" in metric_names:
         results["LCS"] = logical_consistency_score(predicted_probs, symbolic_probs)
     if "DER" in metric_names:
-        results["DER"] = data_efficiency_ratio(results.get("EDA", 0.0), len(items))
+        # DER is per few-shot sample actually evaluated, not per full file.
+        results["DER"] = data_efficiency_ratio(results.get("EDA", 0.0), len(shot_items))
     if "RIF1" in metric_names:
-        premises_all = [p for batch in items for p in batch.get("premises", [])]
+        premises_all = [p for sample in items for p in (sample.get("premises", []) or [])]
         validated_discovered = set(filter_valid_rules(discovered_rules, premises_all))
         validated_gold = set(filter_valid_rules(gold_rules, premises_all))
         results["RIF1"] = rule_induction_f1(validated_discovered, validated_gold)

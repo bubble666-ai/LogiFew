@@ -22,4 +22,4 @@ evaluation:
     transformer_t5_small:
       EDA: 0.52
       DER: 0.003
-*** End Patch
+

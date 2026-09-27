@@ -15,6 +15,8 @@ from logifew.data.synthetic_rulebank import generate_rule_bank, to_training_exam
 from logifew.models.nsml import NSMLConfig
 from logifew.training.module import NSMLLightningModule, TrainingConfig
 
+ALLOWED_ENCODERS = {"bow", "hf_text"}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train the NSML model.")
@@ -31,11 +33,22 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_config(path: Path) -> dict:
+    if not path.is_file():
+        raise FileNotFoundError(f"Config not found: {path}")
     with path.open("r", encoding="utf-8") as handle:
-        return yaml.safe_load(handle)
+        cfg = yaml.safe_load(handle)
+    if not isinstance(cfg, dict):
+        raise ValueError(f"Config {path} must be a mapping")
+    for section in ("experiment", "data", "training"):
+        if section not in cfg:
+            raise ValueError(f"Config {path} missing required section: {section}")
+    enc = cfg.get("model", {}).get("encoder", {}).get("type", "bow")
+    if enc not in ALLOWED_ENCODERS:
+        raise ValueError(f"Config {path}: encoder.type must be one of {sorted(ALLOWED_ENCODERS)}, got {enc!r}")
+    return cfg
 
 
-def build_dataloaders(config: dict) -> tuple[DataLoader, DataLoader]:
+def build_dataloaders(config: dict, seed: int = 42) -> tuple[DataLoader, DataLoader]:
     dataset_cfg = config["data"]["synthetic_rulebank"]
     clauses = generate_rule_bank(
         num_proofs=dataset_cfg.get("num_proofs", 500),
@@ -50,7 +63,8 @@ def build_dataloaders(config: dict) -> tuple[DataLoader, DataLoader]:
     dataset = ClevrerBetaSDataset(items, encoder=TextEncoder())
     val_size = max(1, int(0.1 * len(dataset)))
     train_size = len(dataset) - val_size
-    train_data, val_data = random_split(dataset, [train_size, val_size])
+    generator = torch.Generator().manual_seed(seed)
+    train_data, val_data = random_split(dataset, [train_size, val_size], generator=generator)
 
     batch_size = config["training"].get("batch_size", 16)
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
@@ -64,7 +78,7 @@ def main() -> None:
     cfg = load_config(config_path)
     seed_everything(cfg["experiment"].get("seed", 42), workers=True)
 
-    train_loader, val_loader = build_dataloaders(cfg)
+    train_loader, val_loader = build_dataloaders(cfg, seed=cfg["experiment"].get("seed", 42))
 
     model_cfg = cfg.get("model", {})
     encoder_cfg = model_cfg.get("encoder", {})

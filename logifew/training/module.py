@@ -26,7 +26,10 @@ class NSMLLightningModule(LightningModule):
         super().__init__()
         self.model = NSMLModel(model_config)
         self.training_config = training_config or TrainingConfig()
-        self.metric_acc = Accuracy(task="binary")
+        # ponytail: separate train/val metrics; one shared Accuracy accumulates
+        # across stages and silently corrupts val_acc (drives early stopping).
+        self.train_acc = Accuracy(task="binary")
+        self.val_acc = Accuracy(task="binary")
 
     def forward(
         self,
@@ -56,11 +59,16 @@ class NSMLLightningModule(LightningModule):
             labels=labels,
         )
         self.log(f"{stage}_loss", losses["total_loss"], on_step=False, on_epoch=True, prog_bar=True)
-        if stage != "test":
+        if stage == "train":
             predictions = (outputs["probabilities"] > 0.5).long()
             target = (labels == 1).long()
-            acc = self.metric_acc(predictions, target)
-            self.log(f"{stage}_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
+            acc = self.train_acc(predictions, target)
+            self.log("train_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
+        elif stage == "val":
+            predictions = (outputs["probabilities"] > 0.5).long()
+            target = (labels == 1).long()
+            acc = self.val_acc(predictions, target)
+            self.log("val_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
         return losses["total_loss"]
 
     def training_step(self, batch: dict, batch_idx: int) -> torch.Tensor:

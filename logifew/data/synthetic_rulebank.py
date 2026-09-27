@@ -40,6 +40,18 @@ def generate_rule_bank(
     seed: int = 23,
 ) -> List[SyntheticClause]:
     """Create a set of labelled clauses with reasoning chains."""
+    if num_proofs <= 0:
+        raise ValueError(f"num_proofs must be positive, got {num_proofs}")
+    if not predicates:
+        raise ValueError("predicates must be non-empty")
+    if not variables:
+        raise ValueError("variables must be non-empty")
+    if not 0.0 <= noise_probability <= 1.0:
+        raise ValueError(f"noise_probability must be in [0, 1], got {noise_probability}")
+    if not 0.0 <= negative_ratio <= 1.0:
+        raise ValueError(f"negative_ratio must be in [0, 1], got {negative_ratio}")
+    if max_body_literals < 1:
+        raise ValueError(f"max_body_literals must be >= 1, got {max_body_literals}")
     rng = random.Random(seed)
     clauses: List[SyntheticClause] = []
 

@@ -9,10 +9,22 @@ from typing import Iterable, List
 
 SUPPORTED_ANSWERS = {"yes", "no"}
 
+MAX_ANNOTATION_BYTES = 200_000_000  # 200 MB — refuse larger annotation blobs
+
 
 def load_annotations(path: Path) -> list[dict]:
-    with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+    if not path.is_file():
+        raise FileNotFoundError(f"Annotation file not found: {path}")
+    if path.stat().st_size > MAX_ANNOTATION_BYTES:
+        raise ValueError(f"Annotation file {path} exceeds {MAX_ANNOTATION_BYTES} bytes")
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
+    if not isinstance(data, list):
+        raise ValueError(f"Annotation file {path} must contain a list, got {type(data).__name__}")
+    return data
 
 
 def translate_question(video_id: str, question: dict) -> dict | None:
@@ -40,6 +52,8 @@ def translate_question(video_id: str, question: dict) -> dict | None:
         if chunk:
             premises.append(" -> ".join(chunk))
     question_text = question.get("question", "")
+    if not isinstance(question_text, str) or not question_text.strip():
+        return None
     return {
         "video_id": video_id,
         "premises": premises or ["program_tokens"],

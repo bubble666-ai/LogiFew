@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "logifew"
+version = "0.2.0"
+description = "Neural-symbolic few-shot deductive reasoning (NSML) on CLEVRER-style QA"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = ["neuro-symbolic", "few-shot", "reasoning", "clevrer"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "torch>=2.3",
+  "transformers>=4.40",
+  "pytorch-lightning>=2.2",
+  "torchmetrics>=1.3",
+  "tqdm>=4.66",
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+hf = ["transformers>=4.40", "datasets>=2.18"]
+logic = ["problog>=0.4", "rdflib>=7"]
+tracking = ["wandb>=0.16"]
+viz = ["scikit-learn>=1.4"]
+test = ["pytest>=7"]
+all = ["datasets>=2.18", "problog>=0.4", "rdflib>=7", "wandb>=0.16", "scikit-learn>=1.4", "pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/bubble666-ai/LogiFew"
+Repository = "https://github.com/bubble666-ai/LogiFew"
+
+[project.scripts]
+logifew-train = "train:main"
+logifew-adapt = "adapt_real:main"
+logifew-eval = "eval_fewshot:main"
+logifew-backtest = "scripts.backtest_logifew:main"
+logifew-build-beta-s = "scripts.build_clevrer_beta_s:main"
+logifew-build-real = "scripts.build_clevrer_real_subset:main"
+
+[tool.setuptools.packages.find]
+include = ["logifew*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

@@ -14,7 +14,7 @@ data:
 
 model:
   encoder:
-    type: text
+    type: bow
     hidden_size: 256
     dropout: 0.1
   rule_memory:

@@ -6,6 +6,8 @@ import argparse
 from pathlib import Path
 from typing import Tuple
 
+import random
+
 import torch
 import yaml
 from pytorch_lightning import Trainer, seed_everything
@@ -15,7 +17,9 @@ from torch.utils.data import DataLoader, random_split
 from logifew.data.datasets import ClevrerBetaSDataset, TextEncoder, collate_fn, load_jsonl_dataset
 from logifew.models.nsml import NSMLConfig
 from logifew.training.module import NSMLLightningModule, TrainingConfig
-import random
+from logifew.utils.checkpoints import extract_model_state, safe_torch_load
+
+ALLOWED_ENCODERS = {"bow", "hf_text"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -35,8 +39,19 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_config(path: Path) -> dict:
+    if not path.is_file():
+        raise FileNotFoundError(f"Config not found: {path}")
     with path.open("r", encoding="utf-8") as handle:
-        return yaml.safe_load(handle)
+        cfg = yaml.safe_load(handle)
+    if not isinstance(cfg, dict):
+        raise ValueError(f"Config {path} must be a mapping")
+    for section in ("experiment", "data", "training"):
+        if section not in cfg:
+            raise ValueError(f"Config {path} missing required section: {section}")
+    enc = cfg.get("model", {}).get("encoder", {}).get("type", "bow")
+    if enc not in ALLOWED_ENCODERS:
+        raise ValueError(f"Config {path}: encoder.type must be one of {sorted(ALLOWED_ENCODERS)}, got {enc!r}")
+    return cfg
 
 
 def build_dataloaders(cfg: dict, limit_override: int | None = None) -> Tuple[DataLoader, DataLoader]:
@@ -94,8 +109,8 @@ def main() -> None:
 
     pretrained_path = args.pretrained or cfg.get("model", {}).get("checkpoint", "")
     if pretrained_path:
-        state_dict = torch.load(pretrained_path, map_location="cpu")
-        state_to_load = state_dict["state_dict"] if "state_dict" in state_dict else state_dict
+        checkpoint = safe_torch_load(pretrained_path, map_location="cpu")
+        state_to_load, _ = extract_model_state(checkpoint)
         load_result = module.model.load_state_dict(state_to_load, strict=False)
         print(f"Loaded pretrained weights from {pretrained_path}")
         missing, unexpected = load_result.missing_keys, load_result.unexpected_keys

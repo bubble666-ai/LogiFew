@@ -1,20 +1,35 @@
 """Dataset utilities for LogiFew."""
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, List, Sequence
+from typing import List, Sequence
 
 import torch
 from torch.utils.data import Dataset
 
 LABEL_TO_INDEX = {"yes": 1, "no": 0, "unknown": 2}
+INDEX_TO_LABEL = {v: k for k, v in LABEL_TO_INDEX.items()}
 
 
-def _read_jsonl(path: Path) -> List[dict]:
+def _read_jsonl(path: Path, max_lines: int = 100_000) -> List[dict]:
+    if not path.is_file():
+        raise FileNotFoundError(f"Dataset not found: {path}")
+    rows: List[dict] = []
     with path.open("r", encoding="utf-8") as handle:
-        return [json.loads(line) for line in handle]
+        for lineno, line in enumerate(handle, 1):
+            if lineno > max_lines:
+                raise ValueError(f"Dataset {path} exceeds {max_lines} lines — refusing to load fully into memory")
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid JSON in {path} line {lineno}: {exc}") from exc
+    return rows
 
 
 def load_jsonl_dataset(path: Path, limit: int | None = None) -> List[dict]:
@@ -36,17 +51,21 @@ class EncodedExample:
 
 
 class TextEncoder:
-    """Simple whitespace tokenizer with hashing to a fixed vocabulary."""
+    """Simple whitespace tokenizer with hashing to a fixed vocabulary.
 
-    def __init__(self, vocab_size: int = 2048, hash_seed: int = 17) -> None:
+    Uses SHA-256 (not builtin ``hash()``) so encodings are stable across
+    runs regardless of ``PYTHONHASHSEED`` — required for reproducible
+    few-shot splits and cached datasets.
+    """
+
+    def __init__(self, vocab_size: int = 2048) -> None:
         self.vocab_size = vocab_size
-        self.hash_seed = hash_seed
 
     def encode(self, text: str, max_len: int = 64) -> torch.Tensor:
         tokens = text.lower().split()
         vector = torch.zeros(self.vocab_size, dtype=torch.float32)
         for token in tokens[:max_len]:
-            idx = (hash((token, self.hash_seed)) % self.vocab_size)
+            idx = int(hashlib.sha256(token.encode("utf-8")).hexdigest(), 16) % self.vocab_size
             vector[idx] += 1.0
         if vector.norm(p=2) > 0:
             vector = vector / vector.norm(p=2)
@@ -71,19 +90,27 @@ class ClevrerBetaSDataset(Dataset):
 
     def __getitem__(self, index: int) -> EncodedExample:
         sample = self.items[index]
+        try:
+            query_text = str(sample["query"])
+            label = LABEL_TO_INDEX[sample["label"]]
+        except KeyError as exc:
+            raise KeyError(f"Sample {index} missing required key {exc}; keys={sorted(sample)})") from exc
+        if sample["label"] not in LABEL_TO_INDEX:
+            raise ValueError(f"Sample {index} has unknown label {sample['label']!r}")
         premises = sample.get("premises", [])
+        if not isinstance(premises, list):
+            raise ValueError(f"Sample {index} 'premises' must be a list, got {type(premises).__name__}")
         encoded_premises = sum(
-            (self.encoder.encode(p) for p in premises[: self.max_premises]),
+            (self.encoder.encode(str(p)) for p in premises[: self.max_premises]),
             torch.zeros(self.encoder.vocab_size, dtype=torch.float32),
         )
-        query = self.encoder.encode(sample["query"])
-        label = LABEL_TO_INDEX[sample["label"]]
+        query = self.encoder.encode(query_text)
         return EncodedExample(
             premises=encoded_premises,
             query=query,
             label=torch.tensor(label, dtype=torch.long),
             premises_text=[str(p) for p in premises],
-            query_text=str(sample["query"]),
+            query_text=query_text,
             metadata=sample.get("meta", {}),
         )
 

@@ -1,7 +1,11 @@
 """Evaluation metrics for LogiFew."""
 from __future__ import annotations
 
-from typing import Iterable, Sequence, Tuple
+from typing import Iterable, Sequence
+
+
+def _norm(rule: str) -> str:
+    return " ".join(rule.strip().split())
 
 
 def exact_deduction_accuracy(predictions: Sequence[str], labels: Sequence[str]) -> float:
@@ -28,8 +32,8 @@ def logical_consistency_score(predicted_prob: Sequence[float], symbolic_prob: Se
 
 
 def rule_induction_f1(discovered: Iterable[str], gold: Iterable[str]) -> float:
-    discovered_set = set(discovered)
-    gold_set = set(gold)
+    discovered_set = {_norm(r) for r in discovered if r and r.strip()}
+    gold_set = {_norm(r) for r in gold if r and r.strip()}
     if not discovered_set and not gold_set:
         return 1.0
     if not discovered_set or not gold_set:
