@@ -124,19 +124,3 @@ Released under the MIT License (see [`LICENSE`](LICENSE)).
 ---
 
 Built as a learning vehicle for neuro-symbolic few-shot reasoning research. Contributions, questions, and experiment reproductions are welcome!
-
-### 🇮🇷 راهنمای فارسی (خلاصه)
-
-**لاگی‌فیو چیست؟** ترکیب انکدر متنی سبک (BOW یا T5) با حافظه قوانین مشتق‌پذیر و استنتاج احتمالی؛ برای استدلال قیاسی با حداکثر ۱۰ مثال برای هر قانون. خروجی هر پیش‌بینی: پاسخ + ردّ اثبات + قوانین پیشنهادی.
-
-**نصب سریع:**
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-pip install -e .[test]
-```
-
-**اجرا (سه گام):** ۱) ساخت داده مصنوعی/واقعی با اسکریپت‌های `scripts/` ۲) پیش‌آموزش `train.py` بعد تطبیق کم‌نمونه `adapt_real.py` ۳) ارزیابی `eval_fewshot.py` و بک‌تست OOD.
-
-**تغییرات نسخه ۰٫۲٫۰:** رفع خرابی YAML، اصلاح نوع انکدر، تفکیک دقت train/val، امن‌سازی بارگذاری چک‌پوینت (`weights_only`)، هش قطعی SHA-256، اعتبارسنجی ورودی‌ها، پکیج `pyproject` با دستورات CLI، تست‌های امنیتی جدید، CI گیت‌هاب. جزئیات کامل در بخش انگلیسی بالا.
